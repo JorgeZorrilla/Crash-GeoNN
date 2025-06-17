@@ -702,17 +702,6 @@ $#     nid       cid      dofx      dofy      dofz     dofrx     dofry     dofrz
       4840         0         1         1         1         1         1         1
       4845         0         1         1         1         1         1         1
       4849         0         1         1         1         1         1         1
-*PART
-$#                                                                         title
-B-Pillar
-$#     pid     secid       mid     eosid      hgid      grav    adpopt      tmid
-         2         2         2         0         0         0         0         0
-*SECTION_SHELL_TITLE
-B-Pillar-Section
-$#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp
-         2         2       1.0         2       1.0         0         0         1
-$#      t1        t2        t3        t4      nloc     marea      idof    edgset
-       1.5       1.5       1.5       1.5       0.0       0.0       0.0         0
 *ELEMENT_SHELL
 $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
        1       2    4682    4457    4845    4683       0       0       0       0

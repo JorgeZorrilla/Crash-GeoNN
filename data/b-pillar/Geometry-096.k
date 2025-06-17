@@ -685,13 +685,7 @@ LS-DYNA keyword deck by LS-PrePost
       4955         0         1         1         1         1         1         1
       4957         0         1         1         1         1         1         1
       4959         0         1         1         1         1         1         1
-*PART
-B-Pillar
-         2         2         2         0         0         0         0         0
-*SECTION_SHELL_TITLE
-B-Pillar-Section
-         2         2       1.0         2       1.0         0         0         1
-       1.5       1.5       1.5       1.5       0.0       0.0       0.0         0
+
 *ELEMENT_SHELL
        1       2      90     392       6      91       0       0       0       0
        2       2     316     633      91       6       0       0       0       0
