@@ -2,11 +2,11 @@
 *TITLE
 Impact Simulation
 *INCLUDE
-C:\Users\jorge\Documents\M2i\TFM\data\BBDD\Materials.k 
+C:\Users\jorge\Documents\M2i\Crash-GeoNN\data\templates\Materials.k 
 *INCLUDE
-C:\Users\jorge\Documents\M2i\TFM\data\Impactor\ImpactorKeyword.k 
+C:\Users\jorge\Documents\M2i\Crash-GeoNN\data\impactor\ImpactorKeyword.k 
 *INCLUDE
-C:\Users\jorge\Documents\M2i\TFM\data\B-Pillar\Geometry-01Prueba.k 
+${GEOMETRY_KEYWORD_PATH}
 *PART
 $#                                                                         title
 B-Pillar

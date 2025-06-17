@@ -2,7 +2,7 @@ from modules.utilities import *
 from modules.keyword_manager import KeywordManager, SimulationCase
 
 class SimulationCasesManager: 
-    def __init__(self, keyword_path: str, n_cores: int = 4, memory: int = 20):
+    def __init__(self, keyword_path: str, output_dir, n_cores: int = 4, memory: int = 20):
         self.keyword_path = keyword_path
         self.n_cores = n_cores
         self.memory = memory

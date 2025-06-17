@@ -7,9 +7,11 @@ from modules.simulation_case import SimulationCase
 
 class SimulationManager:
     def __init__(self):
-        self.data_dir = "C:/Users/jorge/Documents/M2i/TFM/data/"
-        self.__output_dir = "C:/Users/jorge/Documents/M2i/TFM/simulation_results/"
-
+        self.data_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/data/"
+        self.template_path = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/data/templates/main.k"
+        self.__output_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results/"
+    
+   
     def generate(self, input_keyword_path: str) -> bool:
         """
         Run the ANSYS simulation for the selected geometry and parameters
@@ -20,42 +22,63 @@ class SimulationManager:
         input_keyword = os.path.basename(input_keyword_path).replace('.k', '')
         output_directory = self.__prepare_output_directory(input_keyword, clean=True)
 
-        case_manager = SimulationCasesManager(input_keyword_path, n_cores=4, memory=20)
-        if case_manager.generate_available_cases():
-            available_cases = case_manager.get_available_cases()
-            if not available_cases:
-                print_error("No available simulation cases found. Please generate cases first.")
-                return False
-            
-            successfull_cases = []
-            failed_cases = []
-
-            n_cases = len(available_cases)
-            print_info(f"Starting simulation for {n_cases} cases for keyword '{input_keyword}'.")
-            for i in range(n_cases):
-                print_info(f"Case {i+1}/{n_cases} for keyword '{input_keyword}'...")
-
-                sim_path = os.path.join(output_directory, f"{i}")
-
-                create_clean_dir(sim_path)
-                os.chdir(sim_path) # Change to the simulation directory to save results
-
-                case = available_cases[i]
-
-                if self.__run_simulation(case):
-                    successfull_cases.append(case)
-                else:
-                    print(f"Error: Simulation failed for {input_keyword} with parameter {i}.")
-                    failed_cases.append(case)
-
-                os.chdir(output_directory) # Change back to the output directory 
-
-            self.__create_report(output_directory, successfull_cases, failed_cases)          
-            os.chdir(output_directory) # Change back to the output directory
+        output_file_path = os.path.join(output_directory, "main.k")
+        with open(self.template_path, 'r') as template_file:
+            with open(output_file_path, 'w') as output_file:
+                template_content = template_file.read()
+                adapted_content = template_content.replace("${GEOMETRY_KEYWORD_PATH}", input_keyword_path.replace('\\', '/'))  # Ensure the path is in the correct format
+                output_file.write(adapted_content)
+        
+        os.chdir(output_directory) # Change to the simulation directory to save results
+        case = SimulationCase(
+            keyword_path=output_file_path,
+            n_cores=4,  # Default number of cores
+            memory=20  # Default memory in MB
+        )
+        if self.__run_simulation(case):
+            print_correct(f"Simulation for keyword '{input_keyword}' completed successfully.")
             return True
-        else:  
-            print_error("Failed to generate available simulation cases.")
+        else:
+            print_error(f"Simulation for keyword '{input_keyword}' failed.")
             return False
+
+
+        # case_manager = SimulationCasesManager(input_keyword_path, output_directory, n_cores=4, memory=20)
+        # if case_manager.generate_available_cases():
+        #     available_cases = case_manager.get_available_cases()
+        #     if not available_cases:
+        #         print_error("No available simulation cases found. Please generate cases first.")
+        #         return False
+            
+        #     successfull_cases = []
+        #     failed_cases = []
+
+        #     n_cases = len(available_cases)
+        #     print_info(f"Starting simulation for {n_cases} cases for keyword '{input_keyword}'.")
+        #     for i in range(n_cases):
+        #         print_info(f"Case {i+1}/{n_cases} for keyword '{input_keyword}'...")
+
+        #         sim_path = os.path.join(output_directory, f"{i}")
+
+        #         create_clean_dir(sim_path)
+        #         os.chdir(sim_path) # Change to the simulation directory to save results
+
+        #         case = available_cases[i]
+
+        #         if self.__run_simulation(case):
+        #             successfull_cases.append(case)
+        #         else:
+        #             print(f"Error: Simulation failed for {input_keyword} with parameter {i}.")
+        #             failed_cases.append(case)
+
+        #         os.chdir(output_directory) # Change back to the output directory 
+
+        #     self.__create_report(output_directory, successfull_cases, failed_cases)          
+        #     os.chdir(output_directory) # Change back to the output directory
+        #     return True
+        # else:  
+        #     print_error("Failed to generate available simulation cases.")
+        #     return False
 
     def __create_report(self, output_directory: str, succesfull_cases: list, failed_cases: list) -> None:
         """
@@ -100,7 +123,6 @@ class SimulationManager:
         """
         Run the ANSYS simulation with the specified parameters
         """
-        return True
         if case.is_valid() == True:
             print_info(f"Running simulation with {case.keyword_path}, {case.n_cores} cores, and {case.memory} MB memory...")
             print_info(f"Parameters: {case.get_parameters_string()}")
