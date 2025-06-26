@@ -1,5 +1,5 @@
 $# LS-DYNA Keyword file created by LS-PrePost(R) V4.10.11-27Mar2024
-$# Created on Jun-17-2025 (19:18:33)
+$# Created on Jun-26-2025 (20:37:02)
 *KEYWORD
 *TITLE
 $#                                                                         title
@@ -7,7 +7,7 @@ LS-DYNA keyword deck by LS-PrePost
 *MAT_RIGID_TITLE
 Acero-Rigido
 $#     mid        ro         e        pr         n    couple         m     alias
-         17.85000E-9   2100000       0.0       0.0       0.0       0.0          
+         17.85000E-9   2100000       0.3       0.0       0.0       0.0          
 $#     cmo      con1      con2
        0.0         0         0
 $#lco or a1        a2        a3        v1        v2        v3
@@ -19,9 +19,9 @@ $#     mid        ro         e        pr      sigy      etan      fail      tdel
 $#       c         p      lcss      lcsr        vp
        0.0       0.0         0         0       0.0
 $#    eps1      eps2      eps3      eps4      eps5      eps6      eps7      eps8
-       0.0      0.01      0.02       0.1      0.15       0.0       0.0       0.0
+       0.0      0.01      0.02      0.05       0.1      0.15       0.2      0.25
 $#     es1       es2       es3       es4       es5       es6       es7       es8
-    2100.0    2200.0    2300.0    2400.0    2500.0       0.0       0.0       0.0
+    2100.0    2200.0    2300.0    2400.0    2500.0    2600.0    2700.0    2800.0
 *MAT_JOHNSON_COOK_TITLE
 UHSS Material Johnson-Cook
 $#     mid        ro         g         e        pr       dtf        vp    rateop
