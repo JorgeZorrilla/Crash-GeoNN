@@ -1,5 +1,5 @@
 $# LS-DYNA Keyword file created by LS-PrePost(R) V4.10.11-27Mar2024
-$# Created on Jun-26-2025 (20:37:02)
+$# Created on Jun-26-2025 (21:19:25)
 *KEYWORD
 *TITLE
 $#                                                                         title
@@ -7,7 +7,7 @@ LS-DYNA keyword deck by LS-PrePost
 *MAT_RIGID_TITLE
 Acero-Rigido
 $#     mid        ro         e        pr         n    couple         m     alias
-         17.85000E-9   2100000       0.3       0.0       0.0       0.0          
+         17.85000E-6  210000.0       0.3       0.0       0.0       0.0          
 $#     cmo      con1      con2
        0.0         0         0
 $#lco or a1        a2        a3        v1        v2        v3
@@ -15,7 +15,7 @@ $#lco or a1        a2        a3        v1        v2        v3
 *MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE
 UHSS Material PLP
 $#     mid        ro         e        pr      sigy      etan      fail      tdel
-         27.85000E-9  210000.0       0.3    2100.0    5000.01.00000E21       0.0
+         27.85000E-6  210000.0       0.3    2100.0     250.01.00000E21       0.0
 $#       c         p      lcss      lcsr        vp
        0.0       0.0         0         0       0.0
 $#    eps1      eps2      eps3      eps4      eps5      eps6      eps7      eps8
