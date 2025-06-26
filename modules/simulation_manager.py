@@ -11,8 +11,35 @@ class SimulationManager:
         self.template_path = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/data/templates/main.k"
         self.__output_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results/"
     
-   
-    def generate(self, input_keyword_path: str) -> bool:
+    def generate_all(self, input_keyword_dir: str) -> bool:
+        """
+        Run the ANSYS simulation for all keywords in the specified directory
+        """
+        if not os.path.exists(input_keyword_dir):
+            print(f"Error: The input keyword directory '{input_keyword_dir}' does not exist.")
+            return False
+        
+        keywords = [k for k in os.listdir(input_keyword_dir) if k.endswith('.k')]
+        n_keywords = len(keywords)
+        print_info(f"Found {n_keywords} keywords in the directory.")
+
+        failed_keywords = []
+        for i in range(n_keywords):
+            keyword = keywords[i]
+            keyword_path = os.path.join(input_keyword_dir, keyword)
+            print_info(f"({i}/{n_keywords}) Processing keyword: {keyword}")
+            first = i == 0
+            if not self.generate(keyword_path, not first):
+                failed_keywords.append(keyword)
+
+        if failed_keywords:
+            print_error("Simulation failed for the following keywords:")
+            for keyword in failed_keywords:
+                print_error(f"{keyword}")
+            return False
+        
+        return True
+    def generate(self, input_keyword_path: str, wait = False) -> bool:
         """
         Run the ANSYS simulation for the selected geometry and parameters
         """
@@ -35,7 +62,7 @@ class SimulationManager:
             n_cores=4,  # Default number of cores
             memory=20  # Default memory in MB
         )
-        if self.__run_simulation(case):
+        if self.__run_simulation(case, wait=wait):
             print_correct(f"Simulation for keyword '{input_keyword}' completed successfully.")
             return True
         else:
@@ -119,18 +146,24 @@ class SimulationManager:
     
     
     
-    def __run_simulation(self, case: SimulationCase) -> bool:
+    def __run_simulation(self, case: SimulationCase, wait = False) -> bool:
         """
         Run the ANSYS simulation with the specified parameters
         """
         if case.is_valid() == True:
             print_info(f"Running simulation with {case.keyword_path}, {case.n_cores} cores, and {case.memory} MB memory...")
             print_info(f"Parameters: {case.get_parameters_string()}")
-            ansys_ls_dyna_path = '"C:/Program Files/LS-DYNA Suite R14 Student/lsdyna/ls-dyna_smp_d_R14.1.1s_1-gef50e1efb1_winx64_ifort190.exe"'
-            command = ansys_ls_dyna_path + f' i={case.keyword_path} ncpu={case.n_cores} memory={case.memory}m > lsrun.out.txt 2>&1'
+            # ansys_ls_dyna_path = '"C:/Program Files/LS-DYNA Suite R14 Student/lsdyna/ls-dyna_smp_d_R14.1.1s_1-gef50e1efb1_winx64_ifort190.exe"'
+            ansys_ls_run_path = 'start "" "C:/Program Files/LS-DYNA Suite R14 Student/lspp/LS-Run/lsrun.exe"'
+            command = ansys_ls_run_path + f' -input {case.keyword_path} -submit'
+            if wait:
+                command += ' -wait -1'
+            # command = ansys_ls_dyna_path + f' i={case.keyword_path} ncpu={case.n_cores} memory={case.memory}m > lsrun.out.txt 2>&1'
             start = time.perf_counter()
             os.system(command)
             elapsed = time.perf_counter() - start
+            time.sleep(5)
+            return True
             if self.__check_simulation_status("lsrun.out.txt"):
                 print_correct(f"Simulation completed successfully in {elapsed:.2f} seconds.")
                 return True
