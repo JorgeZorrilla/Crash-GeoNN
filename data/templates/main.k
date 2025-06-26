@@ -47,4 +47,7 @@ $#      dt    binary      lcur     ioopt
 *DATABASE_BINARY_D3PLOT
 $#      dt      lcdt      beam     npltc    psetid
 1.50000E-4         0         0         0         0
+*DATABASE_NODOUT
+$#      dt    binary      lcur     ioopt   option1   option2
+1.50000E-4         0         0         11.50000E-4         0
 *END
