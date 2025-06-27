@@ -8,6 +8,7 @@ from modules.simulation_case import SimulationCase
 class SimulationManager:
     def __init__(self):
         self.data_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/data/"
+        self.template_dir = os.path.join(self.data_dir, "templates")
         self.template_path = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/data/templates/main.k"
         self.__output_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results/"
     
@@ -39,6 +40,7 @@ class SimulationManager:
             return False
         
         return True
+    
     def generate(self, input_keyword_path: str, wait = False) -> bool:
         """
         Run the ANSYS simulation for the selected geometry and parameters
@@ -106,6 +108,82 @@ class SimulationManager:
         # else:  
         #     print_error("Failed to generate available simulation cases.")
         #     return False
+    def postprocess_all(self) -> bool:
+        """
+        Postprocess for all keywords in the specified directory
+        """
+        if not os.path.exists(self.__output_dir):
+            print(f"Error: The simulation_results directory '{self.__output_dir}' does not exist.")
+            return False
+        
+        results_directories = os.listdir(self.__output_dir)
+        n_results = len(results_directories)
+        print_info(f"Found {n_results} results in the results directory.")
+
+        cfile = os.path.join(self.template_dir, "extract_results.cfile")
+
+        failed_results = []
+        for i in range(n_results):
+            result = results_directories[i]
+            result_path = os.path.join(self.__output_dir, result)
+            print_info(f"({i}/{n_results}) PostProcessing result: {result}")
+            
+            # copy_file(cfile, result_path)
+            # cfile_path = os.path.join(result_path, "extract_results.cfile")
+            # with open(cfile_path, 'r') as cfile_file:
+            #     cfile_content = cfile_file.read()
+            #     adapted_content = cfile_content.replace("${PATH}", result_path.replace('\\', '/').join("output_data.txt"))
+            #     with open(cfile_path, 'w') as cfile_file:
+            #         cfile_file.write(adapted_content)
+            
+
+        
+            if not self.postprocess(result_path):
+                failed_results.append(result)
+
+        if failed_results:
+            print_error("Postprocessing failed for the following resullts:")
+            for result in failed_results:
+                print_error(f"{result}")
+            return False
+        
+        return True
+    def postprocess(self, results_directory: str) -> bool:
+        """
+        Postprocess the simulation results for the specified directory
+        """
+        if not os.path.exists(results_directory):
+            print(f"Error: The results directory '{results_directory}' does not exist.")
+            return False
+        if self.__check_simulation_status(results_directory + "/lsrun.out.txt"):
+            print_correct(f"Simulation completed successfully in {results_directory}.")
+        else:   
+            print_error(f"Cancelling postprocessing: Simulation failed or did not terminate normally in {results_directory}. Check 'lsrun.out.txt' for details.")
+            return False
+        
+        cfile = os.path.join(self.template_dir, "extract_results.cfile")
+        copy_file(cfile, results_directory)
+        
+        cfile_path = os.path.join(results_directory, "extract_results.cfile")
+        adapted_content = ""
+        with open(cfile_path, 'r') as cfile_file:
+            cfile_content = cfile_file.read()
+            adapted_content = cfile_content.replace("${PATH}", results_directory.replace('\\', '/') + "/output_data.txt")
+        with open(cfile_path, 'w') as cfile_file:
+            cfile_file.write(adapted_content)
+        print_info(f"Postprocessing results in {results_directory}...")
+        ansys_lspp_path = '"C:/Program Files/LS-DYNA Suite R14 Student/lspp/lsprepost4.10_x64.exe"'
+        command = ansys_lspp_path + f' -nographics c="{cfile_path}"'
+        command = 'start "" ' + command  # Use start to run in a new window
+        start = time.perf_counter()
+        os.system(command)
+        elapsed = time.perf_counter() - start       
+        print_correct(f"Postprocessing completed in {elapsed:.2f} seconds.")
+
+        print_info(f"Postprocessing completed for {results_directory}.")
+        return True
+        
+
 
     def __create_report(self, output_directory: str, succesfull_cases: list, failed_cases: list) -> None:
         """

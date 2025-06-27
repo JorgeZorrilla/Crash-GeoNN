@@ -1,0 +1,5 @@
+$# LS-PrePost command file created by LS-PrePost(R) V4.10.11-27Mar2024 -64bit-Window
+$# Template
+$# Example: output "C:\Users\jorge\Documents\M2i\Crash-GeoNN\simulation_results\Geometry-0\output_data" 1:102 1 0 1 0 1 1 0 0 1 0 0 0 0 0 1.000000 0 0
+open d3plot "d3plot"
+output "${PATH}" 1:102 1 0 1 0 1 1 0 0 1 0 0 0 0 0 1.000000 0 0
