@@ -14,7 +14,7 @@ Impactor-Shell-Section
 $#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp
          1         2       1.0         2       1.0         0         0         1
 $#      t1        t2        t3        t4      nloc     marea      idof    edgset
-       1.5       1.5       1.5       1.5       0.0       0.0       0.0         0
+       1.0       1.0       1.0       1.0       0.0       0.0       0.0         0
 *ELEMENT_SHELL
 $#   eid     pid      n1      n2      n3      n4      n5      n6      n7      n8
  1000000       1 1000001 1000014 1000080 1000055       0       0       0       0
