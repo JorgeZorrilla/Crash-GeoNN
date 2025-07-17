@@ -29,9 +29,11 @@ $#     cid                                                                 title
 $#   surfa     surfb  surfatyp  surfbtyp   saboxid   sbboxid      sapr      sbpr
          1         2         3         3         0         0         0         0
 $#      fs        fd        dc        vc       vdc    penchk        bt        dt
-       0.2       0.1       0.0       0.0       0.0         0       0.01.00000E20
+       0.2       0.1       0.0       0.0       0.0         1       0.01.00000E20
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
+$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq
+         2       0.1         0     1.025         2         2         0         1
 *CONTACT_AUTOMATIC_SINGLE_SURFACE_ID
 $#     cid                                                                 title
          2AutoContact
