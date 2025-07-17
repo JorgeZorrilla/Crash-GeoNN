@@ -8,7 +8,7 @@ LS-DYNA keyword deck by LS-PrePost
 $#                                                                         title
 Impactor
 $#     pid     secid       mid     eosid      hgid      grav    adpopt      tmid
-         1         1         1         0         0         0         0         0
+         1         1         1         0         0         1         0         0
 *SECTION_SHELL_TITLE
 Impactor-Shell-Section
 $#   secid    elform      shrf       nip     propt   qr/irid     icomp     setyp
