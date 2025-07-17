@@ -22,7 +22,7 @@ $#      t1        t2        t3        t4      nloc     marea      idof    edgset
 $#      id      styp     omega        vx        vy        vz     ivatn      icid
          1         2       0.0       0.0    9160.0       0.0         0         0
 $#      xc        yc        zc        nx        ny        nz     phase    irigid
-       0.0       0.0       0.0       0.0       0.0       0.0         0         0
+       0.0       0.0       0.0       0.0       0.0       0.0         0         1
 *CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID
 $#     cid                                                                 title
          1Contact-B-Pillar-Impactor
