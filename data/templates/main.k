@@ -32,6 +32,15 @@ $#      fs        fd        dc        vc       vdc    penchk        bt        dt
        0.2       0.1       0.0       0.0       0.0         0       0.01.00000E20
 $#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
        1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
+*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID
+$#     cid                                                                 title
+         2AutoContact
+$#   surfa     surfb  surfatyp  surfbtyp   saboxid   sbboxid      sapr      sbpr
+         2         2         3         3         0         0         0         0
+$#      fs        fd        dc        vc       vdc    penchk        bt        dt
+       0.0       0.0       0.0       0.0       0.0         0       0.01.00000E20
+$#    sfsa      sfsb      sast      sbst     sfsat     sfsbt       fsf       vsf
+       1.0       1.0       0.0       0.0       1.0       1.0       1.0       1.0
 *CONTROL_ENERGY
 $#    hgen      rwen    slnten     rylen     irgen     maten     drlen     disen
          2         2         2         2         2         1         1         1
