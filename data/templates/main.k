@@ -48,7 +48,7 @@ $#    hgen      rwen    slnten     rylen     irgen     maten     drlen     disen
          2         2         2         2         2         1         1         1
 *CONTROL_TERMINATION
 $#  endtim    endcyc     dtmin    endeng    endmas     nosol
-     0.015         0       0.0       0.01.000000E8         0
+     0.15         0       0.0       0.01.000000E8         0
 *DATABASE_GLSTAT
 $#      dt    binary      lcur     ioopt
 1.50000E-4         0         0         1
