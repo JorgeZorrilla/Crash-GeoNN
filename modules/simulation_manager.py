@@ -116,6 +116,9 @@ class SimulationManager:
             print(f"Error: The simulation_results directory '{self.__output_dir}' does not exist.")
             return False
         
+        clean_dir = self.__output_dir + "/clean_results"
+        create_clean_dir(clean_dir)
+        
         results_directories = os.listdir(self.__output_dir)
         n_results = len(results_directories)
         print_info(f"Found {n_results} results in the results directory.")
@@ -126,20 +129,17 @@ class SimulationManager:
         for i in range(n_results):
             result = results_directories[i]
             result_path = os.path.join(self.__output_dir, result)
+            if result_path == clean_dir:
+                continue
             print_info(f"({i}/{n_results}) PostProcessing result: {result}")
             
-            # copy_file(cfile, result_path)
-            # cfile_path = os.path.join(result_path, "extract_results.cfile")
-            # with open(cfile_path, 'r') as cfile_file:
-            #     cfile_content = cfile_file.read()
-            #     adapted_content = cfile_content.replace("${PATH}", result_path.replace('\\', '/').join("output_data.txt"))
-            #     with open(cfile_path, 'w') as cfile_file:
-            #         cfile_file.write(adapted_content)
-            
-
-        
             if not self.postprocess(result_path):
                 failed_results.append(result)
+            else:
+                clean_result = result_path + "/output_data.txt"
+                new_result  = clean_dir + "/" + result + ".txt"
+                if os.path.exists(clean_result):
+                    copy_file(clean_result, new_result)
 
         if failed_results:
             print_error("Postprocessing failed for the following resullts:")
