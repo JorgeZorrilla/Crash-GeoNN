@@ -9,17 +9,13 @@ class LineReader:
     def __init__(self, file):
         self.iterator = iter(file)
         self._buffer = None
-
-    def __iter__(self):
-        return self
-
+    def __iter__(self): return self
     def __next__(self):
         if self._buffer is not None:
             line = self._buffer
             self._buffer = None
             return line
         return next(self.iterator)
-
     def push_back(self, line):
         self._buffer = line
 
@@ -27,7 +23,36 @@ class DataPreProcessing:
     def __init__(self) -> None:
         pass
 
-       # -----------------------------
+    def pre_process_all(self, input_dir, output_dir):
+        graph_sequences = []
+        if not os.path.exists(output_dir):
+            os.mkdir(output_dir)
+        if os.path.exists(input_dir):
+            for file in os.listdir(input_dir):
+                if file.endswith(".txt"):
+                    simulation_id = re.search(r"-(\d+)\.txt", file)
+                    simulation_id = simulation_id.group(1) if simulation_id else "0"
+
+                    full_path = os.path.join(input_dir, file)
+                    simulation_graphs = self.pre_process(full_path)
+                    if simulation_graphs:
+                        graph_sequences.append(simulation_graphs)
+                        output_file = os.path.join(output_dir, "graph_" + simulation_id + ".pt")
+                        torch.save(simulation_graphs, output_file)
+        print(f"Total number of graph sequences: {len(graph_sequences)}")
+        bbdd_file = os.path.join(input_dir, "GRAPHS.pt")
+        print(f"Writing database to {bbdd_file}")
+        torch.save(graph_sequences, bbdd_file)
+
+    def pre_process(self, input_file: str):
+        file_name = os.path.basename(input_file)
+        print(f"PreProcessing {file_name}...")
+        # simulation_id = re.search(r"-(\d+)\.txt", file_name)
+        # simulation_id = int(simulation_id.group(1)) if simulation_id else 0
+        step_graphs = self.__preprocess_input(input_file)
+        return step_graphs
+
+    # -----------------------------
     # Helpers de normalización IDs
     # -----------------------------
     @staticmethod
@@ -83,136 +108,129 @@ class DataPreProcessing:
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
         return edge_index
 
-    def pre_process_all(self, input_dir):
-        graph_sequences = []
-        if os.path.exists(input_dir):
-            files = os.listdir(input_dir)
-            for file in files:
-                if file.endswith(".txt"):
-                    full_path = os.path.join(input_dir, file)
-                    simulation_graphs =  self.pre_process(full_path)
-                    if simulation_graphs:
-                        # graph_sequences = graph_sequences + simulation_graphs
-                        graph_sequences.append(simulation_graphs)
-        print(f"Total number of graph sequences: {len(graph_sequences)}")
-        bbdd_file = input_dir + "/GRAPHS.pt"
-        print(f"Writing database to {bbdd_file}")
-        torch.save(graph_sequences, bbdd_file)
-        
-
-    def pre_process(self, input_file: str):
-        file_name = os.path.basename(input_file)
-        print(f"PostProcessing {file_name}...")
-        simulation_id = re.search(r"-(\d+)\.txt", file_name)
-        simulation_id = int(simulation_id.group(1)) if simulation_id else 0
-            
-        step_graphs = self.__preprocess_input(input_file)
-        return step_graphs
-
-    
+    # -----------------------------
+    # Parsing del fichero
+    # -----------------------------
     def __preprocess_input(self, input_file: str):
-        nodals_positions_per_state = {}
-        connectivity = None
-
-        with open(input_file, 'r') as input:
-            iterator = LineReader(input)
+        nodal_positions_per_state = {}   # state -> {old_id: [x,y,z]}
+        elements_nodes = []              # lista de elementos, cada uno = [old_id_i,...]
+        with open(input_file, 'r') as input_f:
+            iterator = LineReader(input_f)
             current_state = -1
             for line in iterator:
-                if line.startswith("*ELEMENT") and connectivity is None:
-                    connectivity, next_line = self.__process_connectivity(iterator)
+                if line.startswith("*ELEMENT") and not elements_nodes:
+                    # leemos elementos como listas de old_ids (no edges aún)
+                    elems, next_line = self.__read_elements(iterator)
+                    elements_nodes.extend(elems)
                     if next_line:
                         iterator.push_back(next_line)
                 elif line.startswith("$STATE_NO = "):
                     current_state += 1
                 elif line.startswith("*NODE"):
                     nodes, next_line = self.__process_nodes(iterator)
-                    nodals_positions_per_state[current_state] = nodes
+                    nodal_positions_per_state[current_state] = nodes
                     if next_line:
                         iterator.push_back(next_line)
-        coords = self.__prepare_nodes_inputs(nodals_positions_per_state)
 
-        T, num_nodes, dim = coords.shape
+        # --- construir coords y orden de old_ids por fila ---
+        coords, old_id_order = self.__prepare_nodes_inputs(nodal_positions_per_state)
 
-        # # Initial node features
-        # x = coords[0] # (num_nodes, 3)
-        # # Target: relative displacements in time
-        # displacements = coords - coords[0]   # (T, num_nodes, 3)
+        # --- mapping old_id -> new_idx (0..N-1) ---
+        old2new, new2old = self._build_id_map(old_id_order)
 
-        # data = Data(
-        #     x = x,
-        #     edge_index= connectivity,
-        #     y = displacements
-        # )
+        # --- reordenar coords a 0..N-1 (por si old_id_order no está compactado) ---
+        idx_newpos = torch.tensor([old2new[int(oid)] for oid in old_id_order], dtype=torch.long)
+        coords = coords[:, idx_newpos, :]  # (T,N,3) reordenado a 0..N-1
 
-        displacements = coords - coords[0]   # (T, num_nodes, 3)
+        # --- edge_index desde elementos remapeados ---
+        edge_index = self._build_edge_index_from_elements(elements_nodes, old2new, bidirectional=True, clique=True)
+
+        # --- generar Data por timestep ---
+        T, N, _ = coords.shape
+        displacements = coords - coords[0]  # (T,N,3)
         pos0 = coords[0]
         data_list = []
-        for t in range(T-1):  # hasta T-2 porque predices t+1
-            x_t = displacements[t]           # (num_nodes, 3)
-            y_t = displacements[t+1]         # (num_nodes, 3)
-            
+        for t in range(T-1):
+            x_t = displacements[t]
+            y_t = displacements[t+1]
+            edge_attr = self.__build_edge_attr(edge_index, pos0)
             data = Data(
-                x=x_t, 
-                edge_index=connectivity, 
+                x=x_t,
                 y=y_t,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
                 pos0=pos0
             )
+            # guarda también el mapeo si te sirve para trazar resultados
+            data.orig_node_id = torch.tensor(new2old, dtype=torch.long)  # tamaño N
+            data.t_idx = torch.tensor([t], dtype=torch.long)
             data_list.append(data)
 
+        # sanity checks
+        assert int(edge_index.max()) < N and int(edge_index.min()) >= 0, \
+            "edge_index fuera de rango tras remapeo"
         return data_list
-        # return connectivity, nodals_positions_per_state
-    
+
     def __prepare_nodes_inputs(self, nodal_positions_per_state):
         timesteps = sorted(nodal_positions_per_state.keys())
-        node_ids = sorted(next(iter(nodal_positions_per_state.values())).keys())
-
+        # conjunto de IDs presentes en el primer estado (asumimos mismos nodos en todos)
+        node_ids = sorted(nodal_positions_per_state[timesteps[0]].keys())
         coords = np.array([
-            [nodal_positions_per_state[t][n] for n in node_ids]   # nodos por timestep
-            for t in timesteps                   # recorrer timesteps
-        ])
+            [nodal_positions_per_state[t][n] for n in node_ids]
+            for t in timesteps
+        ], dtype=np.float32)
+        coords = torch.tensor(coords, dtype=torch.float32)  # (T,N,3)
+        return coords, node_ids
+    
+    def __build_edge_attr(self, edge_index, pos0):
+        src, dst = edge_index
+        rel_vec = pos0[dst] - pos0[src]            # (E, 3)
+        length = rel_vec.norm(dim=-1, keepdim=True) # (E, 1)
+        direction = rel_vec / (length + 1e-9)       # (E, 3)
+        edge_attr = torch.cat([length, direction], dim=-1)  # (E, 4)
+        return edge_attr
 
-        if not torch.is_tensor(coords):
-            coords = torch.tensor(coords, dtype=torch.float)
-        return coords
-
-   
-    def __process_connectivity(self, iterator):
-        edges = set()
-        line = None
+    def __read_elements(self, iterator):
+        """
+        Lee bloque *ELEMENT y devuelve lista de elementos como listas de old_ids (nodos).
+        No construye aristas aquí; se hace después con el mapping old->new.
+        """
+        elements = []
+        next_line = None
         for line in iterator:
             if line.startswith("*"):
+                next_line = line
                 break
             parts = line.strip().split()
-            if len(parts) < 6:
+            # formato típico: <elem_id> <part_id> n1 n2 n3 n4 ...
+            if len(parts) < 3:
                 continue
-            _, _, *nodes = map(int, parts)
-            n = len(nodes)
-            for i in range(n):
-                node1 = nodes[i]
-                node2 = nodes[(i+1) % n]
-                if node1 != node2:
-                    edges.add((node1, node2))
-                    edges.add((node2, node1))
-        return torch.tensor(list(edges), dtype=torch.long).t().contiguous(), line
-    
+            # ignoramos elem_id y part_id; nos quedamos con nodos
+            _, _, *nodes = parts
+            try:
+                nodes = [int(n) for n in nodes]
+            except ValueError:
+                continue
+            elements.append(nodes)
+        return elements, next_line
+
     def __process_nodes(self, iterator):
         nodes = {}
+        next_line = None
         for line in iterator:
             if line.startswith("*"):
-                return nodes, line
+                next_line = line
+                break
             parts = line.strip().split()
             if len(parts) < 4:
                 continue
-            idx = int(parts[0])
+            idx = int(parts[0])                     # old_id de nodo
             coords = list(map(float, parts[1:4]))
             nodes[idx] = coords
-        return nodes, None
-    
+        return nodes, next_line
+
 if __name__ == "__main__":
     preprocessing = DataPreProcessing()
-    # input_file = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results/Geometry-093/output_data.txt"
-    # postprocessing.post_process(input_file)
-
     input_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results/clean_results/"
-    preprocessing.pre_process_all(input_dir)
-    
+    output_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results/graphs/"
+    preprocessing.pre_process_all(input_dir, output_dir)
