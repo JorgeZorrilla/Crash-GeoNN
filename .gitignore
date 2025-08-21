@@ -1,3 +1,4 @@
 simulation_results/
 modules/__pycache__/
 modules/*.pyc
+.env
