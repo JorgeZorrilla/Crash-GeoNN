@@ -112,6 +112,10 @@ class DataPreProcessing:
     # Parsing del fichero
     # -----------------------------
     def __preprocess_input(self, input_file: str):
+        file_name = os.path.basename(input_file)
+        simulation_id = re.search(r"-(\d+)\.txt", file_name)
+        simulation_id = simulation_id.group(1) if simulation_id else "0"
+
         nodal_positions_per_state = {}   # state -> {old_id: [x,y,z]}
         elements_nodes = []              # lista de elementos, cada uno = [old_id_i,...]
         with open(input_file, 'r') as input_f:
@@ -145,8 +149,14 @@ class DataPreProcessing:
         # --- edge_index desde elementos remapeados ---
         edge_index = self._build_edge_index_from_elements(elements_nodes, old2new, bidirectional=True, clique=True)
 
-        # --- generar Data por timestep ---
         T, N, _ = coords.shape
+
+        # ----------  detectar nodos fijos ----------
+        bc_mask, fixed_idx, max_move = self.__infer_fixed_nodes(coords, 1e-6)
+        num_fixed = int(bc_mask.sum())
+        # print(f"[BC] fixed_tol={1e-6:g} → fixed nodes: {num_fixed}/{N}")
+
+        # --- generar Data por timestep ---
         displacements = coords - coords[0]  # (T,N,3)
         pos0 = coords[0]
         data_list = []
@@ -159,17 +169,41 @@ class DataPreProcessing:
                 y=y_t,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
-                pos0=pos0
+                pos0=pos0,
+                bc_mask = bc_mask,
+                fixed_idx = fixed_idx,
+                simulation_id = simulation_id
             )
             # guarda también el mapeo si te sirve para trazar resultados
             data.orig_node_id = torch.tensor(new2old, dtype=torch.long)  # tamaño N
             data.t_idx = torch.tensor([t], dtype=torch.long)
+
+            # bc_feat = bc_mask.float().unsqueeze(1)     # (N,1)
+            # data.x = torch.cat([data.x, bc_feat], dim=1)  # → in_channels = 4
             data_list.append(data)
 
         # sanity checks
         assert int(edge_index.max()) < N and int(edge_index.min()) >= 0, \
             "edge_index fuera de rango tras remapeo"
         return data_list
+    
+    def __infer_fixed_nodes(self, coords: torch.Tensor, tol: float):
+        """
+        coords: Tensor (T, N, 3) con coordenadas absolutas.
+        Devuelve:
+          - bc_mask: BoolTensor (N,) True si el nodo no se mueve (<= tol en toda la secuencia)
+          - fixed_idx: LongTensor (K,) índices de nodos fijos
+          - max_move: Tensor (N,) desplazamiento máximo por nodo (útil para depurar)
+        """
+        # Desplazamientos relativos al estado inicial
+        disp = coords - coords[0]               # (T, N, 3)
+        # Norma por timestep y nodo
+        step_norm = torch.linalg.norm(disp, dim=2)   # (T, N)
+        # Máximo a lo largo del tiempo
+        max_move = step_norm.max(dim=0).values       # (N,)
+        bc_mask = max_move <= tol
+        fixed_idx = torch.nonzero(bc_mask, as_tuple=True)[0]
+        return bc_mask, fixed_idx, max_move
 
     def __prepare_nodes_inputs(self, nodal_positions_per_state):
         timesteps = sorted(nodal_positions_per_state.keys())
