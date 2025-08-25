@@ -11,7 +11,7 @@ class D3PlotPostProcess:
     def __init__(self) -> None:
         pass
 
-    def process_all(self, input_dir, output_dir):
+    def process_all(self, input_dir, output_dir, time_step = 1):
         # graph_sequences = []
         graph_sequences = 0
         if not os.path.exists(output_dir):
@@ -28,7 +28,7 @@ class D3PlotPostProcess:
 
                         full_path = os.path.join(dir_path, "d3plot")
                         print(f"Processing {full_path}...")
-                        simulation_graphs = self.process(full_path, simulation_id)
+                        simulation_graphs = self.process(full_path, simulation_id, time_step)
                         if simulation_graphs:
                             graph_sequences += len(simulation_graphs)
                             # graph_sequences.append(simulation_graphs)
@@ -39,7 +39,7 @@ class D3PlotPostProcess:
         # print(f"Total number of graph sequences: {len(graph_sequences)}")
         print(f"Total number of graph sequences: {graph_sequences}")
 
-    def process(self, input_path: str, simulation_id: str):
+    def process(self, input_path: str, simulation_id: str, time_step = 1):
         if not os.path.exists(input_path):
             print(f"File {input_path} does not exist!")
             return
@@ -52,8 +52,16 @@ class D3PlotPostProcess:
         initial_nodes_coordinates = arrays["node_coordinates"]
         nodes_displacement = arrays["node_displacement"]
         nodes_coordinates = initial_nodes_coordinates[None, :, :] + nodes_displacement
+        # nodes_coordinates = nodes_displacement
         nodes_velocities = arrays["node_velocity"]
         nodes_acceleration = arrays["node_acceleration"]
+        # d3.plot(800)
+
+        # assert initial_nodes_coordinates.ndim == 2 and initial_nodes_coordinates.shape[1] == 3
+        # assert nodes_displacement.ndim == 3 and nodes_displacement.shape[1:] == initial_nodes_coordinates.shape
+        # # a veces el primer estado es la referencia: displacement en t=0 debe ser ~0
+        # if nodes_displacement.shape[0] > 0:
+        #     assert np.allclose(nodes_displacement[0], 0, atol=1e-12), "El primer estado no es cero; revisa referencia"
 
         # Element fields
         elements_id = arrays["element_shell_ids"]
@@ -88,7 +96,7 @@ class D3PlotPostProcess:
 
         pos0 = nodes_coords_tensor[0]
         data_list = []
-        for t in range(T-1):
+        for t in range(0, T-1, time_step):
             coords_t = nodes_coords_tensor[t] # (N,3)
             coords_t1 = nodes_coords_tensor[t + 1] # (N,3)
             displacements_t = nodes_displacement_tensor[t]
@@ -268,8 +276,9 @@ class D3PlotPostProcess:
 
 if __name__ == "__main__":
     postprocess = D3PlotPostProcess()
+    # input_file = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/simulation_results_copy/Geometry-017/d3plot"
     # input_file = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/d3plots/Geometry-0/d3plot"
-    # postprocess.process(input_file, "0")
+    # postprocess.process(input_file, "0", time_step=5)
     input_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/d3plots/"
     output_dir = "C:/Users/jorge/Documents/M2i/Crash-GeoNN/d3plots/graphs"
-    postprocess.process_all(input_dir, output_dir)
+    postprocess.process_all(input_dir, output_dir, time_step=5)
