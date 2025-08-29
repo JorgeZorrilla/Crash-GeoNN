@@ -6,6 +6,8 @@ import re
 from lasso.dyna import D3plot
 from torch_geometric.data import Data
 import torch
+import vtk
+from vtk.util import numpy_support
 
 class D3PlotPostProcess:
     def __init__(self) -> None:
@@ -28,7 +30,7 @@ class D3PlotPostProcess:
 
                         full_path = os.path.join(dir_path, "d3plot")
                         print(f"Processing {full_path}...")
-                        simulation_graphs = self.process(full_path, simulation_id, time_step)
+                        simulation_graphs = self.process_with_vtk(full_path, simulation_id, time_step)
                         if simulation_graphs:
                             graph_sequences += len(simulation_graphs)
                             # graph_sequences.append(simulation_graphs)
@@ -38,6 +40,67 @@ class D3PlotPostProcess:
                         print("Finished!")
         # print(f"Total number of graph sequences: {len(graph_sequences)}")
         print(f"Total number of graph sequences: {graph_sequences}")
+    
+    def process_with_vtk(self, input_path: str, simulation_id: str, time_step = 1):
+        if not os.path.exists(input_path):
+            print(f"File {input_path} does not exist!")
+            return
+        
+        nodes_displacement, nodes_velocities, nodes_acceleration, pos0, nodes_rigid_mask, edge_index_tensor = self.__read_with_vtk(input_path)
+
+        nodes_displacement_tensor = torch.tensor(nodes_displacement, dtype=torch.float32) # (T, N, 3)
+        nodes_velocities_tensor = torch.tensor(nodes_velocities, dtype=torch.float32) # (T, N, 3)
+        nodes_accelerations_tensor = torch.tensor(nodes_acceleration, dtype=torch.float32) # (T, N, 3)
+        pos0_tensor = torch.tensor(pos0, dtype=torch.float32) # (N, 3)
+
+
+        nodes_rigid_mask_tensor = torch.tensor(nodes_rigid_mask, dtype=torch.int) # (N)
+        fixed_ids, nodes_bc_mask = self.__find_static_nodes(nodes_displacement_tensor, 1e-6, True, True) # (N))
+        nodes_bc_mask_tensor = torch.tensor(nodes_bc_mask, dtype=torch.int) # (N)
+
+        T, N, _ = nodes_displacement_tensor.shape
+
+
+        data_list = []
+        for t in range(0, T-1, time_step):
+            displacements_t = nodes_displacement_tensor[t]
+            displacements_t1 = nodes_displacement_tensor[t+1]
+            v_t = nodes_velocities_tensor[t] # (N,3)
+            v_t1 = nodes_velocities_tensor[t + 1] # (N,3)
+            a_t = nodes_accelerations_tensor[t] # (N,3)
+            a_t1 = nodes_accelerations_tensor[t + 1] # (N,3)
+
+            # svm_t = self.__avg_element_field_to_node(nodes_elements_index, elements_von_mises_tensor[t])
+            # svm_t1 = self.__avg_element_field_to_node(nodes_elements_index, elements_von_mises_tensor[t+1])
+            # peeq_t = self.__avg_element_field_to_node(nodes_elements_index, elements_strain_mean_tensor[t])
+            # peeq_t1 = self.__avg_element_field_to_node(nodes_elements_index, elements_strain_mean_tensor[t+1])
+            
+
+            # x_t = torch.cat([displacements_t, v_t, a_t, svm_t, peeq_t], dim=1) # N_CH = 11
+            x_t = torch.cat([displacements_t, v_t, a_t, nodes_bc_mask_tensor.int().unsqueeze(1), nodes_rigid_mask_tensor.int().unsqueeze(1)], dim=1) # N_CH = 11
+            # y_t = torch.cat([displacements_t1, v_t1, a_t1, svm_t1, peeq_t1], dim=1)  # N_CH = 11
+            y_t = torch.cat([displacements_t1, v_t1, a_t1], dim=1)  # N_CH = 9
+            # assert x_t.shape == y_t.shape
+
+            edge_attr_tensor = self.__build_edge_attr(edge_index_tensor, pos0_tensor)
+            data = Data(
+                x=x_t,
+                y=y_t,
+                edge_index=edge_index_tensor,
+                edge_attr=edge_attr_tensor,
+                pos0=pos0_tensor,
+                bc_mask = nodes_bc_mask_tensor,
+                rigid_mask = nodes_rigid_mask_tensor,
+                simulation_id = simulation_id,
+                t_idx = torch.tensor([t], dtype=torch.long)
+            )
+        
+            data_list.append(data)
+
+        return data_list
+    
+    
+
 
     def process(self, input_path: str, simulation_id: str, time_step = 1):
         if not os.path.exists(input_path):
@@ -132,6 +195,82 @@ class D3PlotPostProcess:
             data_list.append(data)
 
         return data_list
+    
+    def __read_with_vtk(self, input_path):
+        reader = vtk.vtkLSDynaReader()
+        reader.SetFileName(input_path)
+        reader.UpdateInformation()
+
+
+        # Número de timesteps disponibles
+        nsteps = reader.GetNumberOfTimeSteps()
+        times = reader.GetNumberOfTimeSteps()
+        reader.GetTimeStepRange()
+
+        print("Time steps:", times)
+        all_displacements = []
+        all_velocities = []
+        all_accelerations = []
+        pos0 = None
+        connectivity = None
+        rigid_mask = None
+        time_step = reader.GetTimeValue(1) - reader.GetTimeValue(0)
+        for t in range(nsteps):
+            reader.SetTimeStep(t)
+            reader.Update()
+            mb = reader.GetOutput()
+            n_blocks = mb.GetNumberOfBlocks()
+            append = vtk.vtkAppendFilter()
+            for i in range(n_blocks):
+                append.AddInputData(mb.GetBlock(i))
+            append.Update()
+
+            dataset = append.GetOutput()
+            # print("Nº de nodos combinados:", dataset.GetNumberOfPoints())
+            # print("Nº de elements combinados:", dataset.GetNumberOfCells())
+            if isinstance(dataset, vtk.vtkUnstructuredGrid):
+                pd = dataset.GetPointData()
+                # print("  Arrays de nodos:", [pd.GetArrayName(j) for j in range(pd.GetNumberOfArrays())])
+                displacements = numpy_support.vtk_to_numpy(pd.GetArray("Deflection")) # (N,3)
+                all_displacements.append(displacements)
+                velocities = numpy_support.vtk_to_numpy(pd.GetArray("Velocity")) # (N,3)
+                all_velocities.append(velocities)
+                accelerations = numpy_support.vtk_to_numpy(pd.GetArray("Acceleration")) # (N,3)
+                all_accelerations.append(accelerations)
+                absolute_coords = numpy_support.vtk_to_numpy(pd.GetArray("Deflected Coordinates"))  # (N,3)
+                if t == 0 and pos0 == None:
+                    pos0 = absolute_coords # (N,3)
+                if rigid_mask == None:
+                    nodes_ids =  numpy_support.vtk_to_numpy(dataset.GetPointData().GetArray("UserID"))
+                    rigid_solid_ids = numpy_support.vtk_to_numpy(mb.GetBlock(0).GetPointData().GetArray("UserID"))
+                    rigid_mask = [id in rigid_solid_ids for id in nodes_ids]
+                
+                cd = dataset.GetCellData()
+                # print("Número de elementos:", dataset.GetNumberOfCells())
+                # print("  Arrays de celdas:", [cd.GetArrayName(j) for j in range(cd.GetNumberOfArrays())])
+                cells = dataset.GetCells()  # objeto vtkCellArray
+
+                if connectivity == None:
+                    connectivity, _ = self._build_and_adjacency_edge_index_from_vtk(dataset)
+                # # recorrer elementos
+                # for i in range(dataset.GetNumberOfCells()):
+                #     cell = dataset.GetCell(i)  # vtkCell (ej. vtkQuad, vtkHexahedron…)
+                #     ids = [cell.GetPointId(j) for j in range(cell.GetNumberOfPoints())]
+                #     print("Elemento", i, "con nodos:", ids)
+
+                    
+        all_displacements = np.stack(all_displacements, axis=0) # (T,N,3)
+        all_velocities = np.stack(all_velocities, axis=0) # (T,N,3)
+        all_accelerations = np.stack(all_accelerations, axis=0) # (T,N,3)
+
+        
+
+        print("Fin")
+
+        return all_displacements, all_velocities, all_accelerations, pos0, rigid_mask, connectivity
+
+    
+        
 
     def __build_id_map(self, node_ids):
         """
@@ -143,7 +282,98 @@ class D3PlotPostProcess:
         new2old = node_ids_sorted
         return old2new, new2old
     
-    
+    def __find_static_nodes(self, disp, tol: float = 1e-9, ignore_nan: bool = True, return_mask: bool = False):
+        """
+        Devuelve los índices de nodos que NUNCA se mueven más de 'tol'
+        a lo largo de todos los timesteps.
+
+        Parámetros
+        ----------
+        disp : np.ndarray | torch.Tensor, shape (T, N, 3)
+            Desplazamientos acumulados respecto a la posición inicial (pos0).
+        tol : float
+            Tolerancia en norma L2 (misma unidad que tus datos).
+        ignore_nan : bool
+            Si True, ignora NaNs al calcular el máximo en el tiempo.
+            Si un nodo es todo NaN en el tiempo, NO se considera estático.
+        return_mask : bool
+            Si True, devuelve (idx, mask_bool).
+
+        Retorna
+        -------
+        idx : np.ndarray
+            Índices de nodos estáticos.
+        mask_bool : np.ndarray (opcional)
+            Máscara booleana de tamaño N con True en nodos estáticos.
+        """
+        # a numpy
+        if isinstance(disp, torch.Tensor):
+            disp = disp.detach().cpu().numpy()
+        disp = np.asarray(disp)
+        if disp.ndim != 3 or disp.shape[-1] != 3:
+            raise ValueError("disp debe tener shape (T, N, 3)")
+
+        # norma L2^2 por nodo y timestep
+        sq = np.sum(disp * disp, axis=2)  # (T, N)
+
+        if ignore_nan:
+            max_sq = np.nanmax(sq, axis=0)          # (N,)
+            all_nan = np.all(np.isnan(sq), axis=0)  # nodos sin datos válidos
+            static_mask = (max_sq <= tol * tol) & (~all_nan)
+        else:
+            max_sq = np.max(sq, axis=0)
+            static_mask = (max_sq <= tol * tol)
+
+        idx = np.nonzero(static_mask)[0]
+        return (idx, static_mask) if return_mask else idx
+    @staticmethod
+    def _build_and_adjacency_edge_index_from_vtk(dataset, bidirectional=True, clique=True):
+        """
+        elements: lista de elementos, cada uno = [old_id_i, old_id_j, ...]
+        bidirectional: duplica aristas (i,j) y (j,i)
+        clique: si True conecta todos los pares del elemento (más denso y suele ir mejor).
+                si False conecta solo pares consecutivos (anillo).
+        """
+        nodes_elements_index = {}
+
+        undirected_pairs = set()
+        for i in range(dataset.GetNumberOfCells()):
+            cell = dataset.GetCell(i)  # vtkCell (ej. vtkQuad, vtkHexahedron…)
+            ids = [cell.GetPointId(j) for j in range(cell.GetNumberOfPoints())]
+
+            for id in ids:
+                if id not in nodes_elements_index:
+                    nodes_elements_index[id] = set()
+                nodes_elements_index[id].add(i)
+
+            L = len(ids)
+            if L < 2:
+                continue
+            if clique:
+                for a in range(L):
+                    for b in range(a+1, L):
+                        u, v = ids[a], ids[b]
+                        if u == v: continue
+                        undirected_pairs.add((u, v) if u < v else (v, u))
+            else:
+                for a in range(L):
+                    u, v = ids[a], ids[(a+1) % L]
+                    if u == v: continue
+                    undirected_pairs.add((u, v) if u < v else (v, u))
+
+
+        edges = []
+        if bidirectional:
+            for u, v in undirected_pairs:
+                edges.append([u, v])
+                edges.append([v, u])
+        else:
+            edges = [[u, v] for (u, v) in undirected_pairs]
+
+        if len(edges) == 0:
+            raise ValueError("No edges built from elements; check input.")
+        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        return edge_index, nodes_elements_index
     @staticmethod
     def _build_and_adjacency_edge_index(elements, bidirectional=True, clique=True):
         """
