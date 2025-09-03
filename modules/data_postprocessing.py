@@ -1,5 +1,6 @@
 import torch
 from torch_geometric.data import Data
+import numpy as np
 
 import os
 import re
@@ -33,8 +34,9 @@ class DataPostProcessing:
             for file in files:
                 if file.endswith(".txt"):
                     full_path = os.path.join(input_dir, file)
-                    simulation_graphs =  self.post_process(full_path)
+                    simulation_graphs =  self.post_process2(full_path)
                     if simulation_graphs:
+                        # graph_sequences = graph_sequences + simulation_graphs
                         graph_sequences.append(simulation_graphs)
         print(f"Total number of graph sequences: {len(graph_sequences)}")
         bbdd_file = input_dir + "/GRAPHS.pt"
@@ -42,6 +44,16 @@ class DataPostProcessing:
         torch.save(graph_sequences, bbdd_file)
         
 
+    def post_process2(self, input_file: str):
+        file_name = os.path.basename(input_file)
+        print(f"PostProcessing {file_name}...")
+        simulation_id = re.search(r"-(\d+)\.txt", file_name)
+        simulation_id = int(simulation_id.group(1)) if simulation_id else 0
+            
+        step_graphs = self.__process_input2(input_file)
+        return step_graphs
+
+        
     def post_process(self, input_file: str):
         file_name = os.path.basename(input_file)
         print(f"PostProcessing {file_name}...")
@@ -100,6 +112,71 @@ class DataPostProcessing:
 
         return data_list
     
+    def __process_input2(self, input_file: str):
+        nodals_positions_per_state = {}
+        connectivity = None
+
+        with open(input_file, 'r') as input:
+            iterator = LineReader(input)
+            current_state = -1
+            for line in iterator:
+                if line.startswith("*ELEMENT") and connectivity is None:
+                    connectivity, next_line = self.__process_elements2(iterator)
+                    if next_line:
+                        iterator.push_back(next_line)
+                elif line.startswith("$STATE_NO = "):
+                    current_state += 1
+                elif line.startswith("*NODE"):
+                    nodes, next_line = self.__process_nodes(iterator)
+                    nodals_positions_per_state[current_state] = nodes
+                    if next_line:
+                        iterator.push_back(next_line)
+        coords = self.__prepare_nodes_inputs(nodals_positions_per_state)
+
+        T, num_nodes, dim = coords.shape
+
+        # # Initial node features
+        # x = coords[0] # (num_nodes, 3)
+        # # Target: relative displacements in time
+        # displacements = coords - coords[0]   # (T, num_nodes, 3)
+
+        # data = Data(
+        #     x = x,
+        #     edge_index= connectivity,
+        #     y = displacements
+        # )
+
+        displacements = coords - coords[0]   # (T, num_nodes, 3)
+        pos0 = coords[0]
+        data_list = []
+        for t in range(T-1):  # hasta T-2 porque predices t+1
+            x_t = displacements[t]           # (num_nodes, 3)
+            y_t = displacements[t+1]         # (num_nodes, 3)
+            
+            data = Data(
+                x=x_t, 
+                edge_index=connectivity, 
+                y=y_t,
+                pos0=pos0
+            )
+            data_list.append(data)
+
+        return data_list
+        # return connectivity, nodals_positions_per_state
+    
+    def __prepare_nodes_inputs(self, nodal_positions_per_state):
+        timesteps = sorted(nodal_positions_per_state.keys())
+        node_ids = sorted(next(iter(nodal_positions_per_state.values())).keys())
+
+        coords = np.array([
+            [nodal_positions_per_state[t][n] for n in node_ids]   # nodos por timestep
+            for t in timesteps                   # recorrer timesteps
+        ])
+
+        if not torch.is_tensor(coords):
+            coords = torch.tensor(coords, dtype=torch.float)
+        return coords
+
     def __process_input(self, input_file: str):
         nodals_positions_per_state = {}
         connectivity = None
@@ -120,6 +197,28 @@ class DataPostProcessing:
                     if next_line:
                         iterator.push_back(next_line)
         return connectivity, nodals_positions_per_state
+    
+    def __create_connectivity(self, edge_index_list):
+        return torch.tensor(edge_index_list, dtype=torch.long).t().contiguous()
+    
+    def __process_elements2(self, iterator):
+        edges = set()
+        line = None
+        for line in iterator:
+            if line.startswith("*"):
+                break
+            parts = line.strip().split()
+            if len(parts) < 6:
+                continue
+            _, _, *nodes = map(int, parts)
+            n = len(nodes)
+            for i in range(n):
+                node1 = nodes[i]
+                node2 = nodes[(i+1) % n]
+                if node1 != node2:
+                    edges.add((node1, node2))
+                    edges.add((node2, node1))
+        return torch.tensor(list(edges), dtype=torch.long).t().contiguous(), line
     
     def __process_elements(self, iterator):
         edges = set()

@@ -46,8 +46,10 @@ class D3PlotPostProcess:
             print(f"File {input_path} does not exist!")
             return
         
-        nodes_displacement, nodes_velocities, nodes_acceleration, pos0, nodes_rigid_mask, edge_index_tensor = self.__read_with_vtk(input_path)
+        time_steps, nodes_displacement, nodes_velocities, nodes_acceleration, pos0, nodes_rigid_mask, edge_index_tensor, nodes_elements_index, cells_von_mises, cells_pressures, cells_efp = self.__read_with_vtk(input_path)
 
+        global_vel_results = self.check_vel_disp_consistency(nodes_displacement, nodes_velocities, time_steps, simulation_id)
+        vel_scheme = global_vel_results['global']['best']
         nodes_displacement_tensor = torch.tensor(nodes_displacement, dtype=torch.float32) # (T, N, 3)
         nodes_velocities_tensor = torch.tensor(nodes_velocities, dtype=torch.float32) # (T, N, 3)
         nodes_accelerations_tensor = torch.tensor(nodes_acceleration, dtype=torch.float32) # (T, N, 3)
@@ -70,127 +72,61 @@ class D3PlotPostProcess:
             a_t = nodes_accelerations_tensor[t] # (N,3)
             a_t1 = nodes_accelerations_tensor[t + 1] # (N,3)
 
-            # svm_t = self.__avg_element_field_to_node(nodes_elements_index, elements_von_mises_tensor[t])
-            # svm_t1 = self.__avg_element_field_to_node(nodes_elements_index, elements_von_mises_tensor[t+1])
-            # peeq_t = self.__avg_element_field_to_node(nodes_elements_index, elements_strain_mean_tensor[t])
-            # peeq_t1 = self.__avg_element_field_to_node(nodes_elements_index, elements_strain_mean_tensor[t+1])
-            
+            vm_node_t1 = self.__avg_element_field_to_node(nodes_elements_index, cells_von_mises[t+1], N)
+            p_node_t1  = self.__avg_element_field_to_node(nodes_elements_index, cells_pressures[t+1], N)
+            peeq_t1   = self.__avg_element_field_to_node(nodes_elements_index, cells_efp[t+1],       N)
 
-            # x_t = torch.cat([displacements_t, v_t, a_t, svm_t, peeq_t], dim=1) # N_CH = 11
-            x_t = torch.cat([displacements_t, v_t, a_t, nodes_bc_mask_tensor.int().unsqueeze(1), nodes_rigid_mask_tensor.int().unsqueeze(1)], dim=1) # N_CH = 11
-            # y_t = torch.cat([displacements_t1, v_t1, a_t1, svm_t1, peeq_t1], dim=1)  # N_CH = 11
-            y_t = torch.cat([displacements_t1, v_t1, a_t1], dim=1)  # N_CH = 9
-            # assert x_t.shape == y_t.shape
+            vm_node_t1 = torch.from_numpy(vm_node_t1).float().unsqueeze(1)   # (N,1)
+            p_node_t1  = torch.from_numpy(p_node_t1 ).float().unsqueeze(1)   # (N,1)
+            peeq_t1   = torch.from_numpy(peeq_t1).float().unsqueeze(1)    # (N,1)
+
+            bc_col    = nodes_bc_mask_tensor.float().unsqueeze(1)     # (N,1)
+            rigid_col = nodes_rigid_mask_tensor.float().unsqueeze(1)  # (N,1)
 
             edge_attr_tensor = self.__build_edge_attr(edge_index_tensor, pos0_tensor)
-            data = Data(
-                x=x_t,
+
+            dt_sum = np.sum(time_steps[t+1 : t+1+time_step])   # suma de los pasos intermedios
+            t1_step = torch.tensor(float(dt_sum), dtype=torch.float32)
+            data = None
+
+            displacementFocused = True
+            if displacementFocused:
+                x_t = torch.cat([displacements_t,bc_col, rigid_col], dim=1) # N_CH = 5
+                y_t = displacements_t1 # (N,3)
+                phys_target_t1= torch.cat([vm_node_t1, p_node_t1, peeq_t1], dim=1)  # [N,3]
+
+                data = Data(
+                x=x_t, 
                 y=y_t,
                 edge_index=edge_index_tensor,
-                edge_attr=edge_attr_tensor,
+                edge_attr=edge_attr_tensor,  # (geom. de pos0)
                 pos0=pos0_tensor,
-                bc_mask = nodes_bc_mask_tensor,
-                rigid_mask = nodes_rigid_mask_tensor,
+                bc_mask=nodes_bc_mask_tensor,
+                rigid_mask=nodes_rigid_mask_tensor,
+                v_t = v_t,
+                v_t1=v_t1,
+                v_scheme = vel_scheme,
+                aux_phys_target=phys_target_t1,
                 simulation_id = simulation_id,
-                t_idx = torch.tensor([t], dtype=torch.long)
-            )
-        
-            data_list.append(data)
+                t1_step = t1_step,
+                t_idx=torch.tensor([t])
+                )
+            else:
+                x_t = torch.cat([displacements_t, v_t, a_t,
+                                bc_col, rigid_col], dim=1) # N_CH = 11
+                y_t = torch.cat([displacements_t1, v_t1, a_t1], dim=1)  # N_CH = 9
 
-        return data_list
-    
-    
-
-
-    def process(self, input_path: str, simulation_id: str, time_step = 1):
-        if not os.path.exists(input_path):
-            print(f"File {input_path} does not exist!")
-            return
-        d3 = D3plot(input_path)
-        arrays = d3.arrays
-        # print(arrays.keys())
-
-        # Node fields
-        nodes_id = arrays["node_ids"] 
-        initial_nodes_coordinates = arrays["node_coordinates"]
-        nodes_displacement = arrays["node_displacement"]
-        nodes_coordinates = initial_nodes_coordinates[None, :, :] + nodes_displacement
-        # nodes_coordinates = nodes_displacement
-        nodes_velocities = arrays["node_velocity"]
-        nodes_acceleration = arrays["node_acceleration"]
-        # d3.plot(800)
-
-        # assert initial_nodes_coordinates.ndim == 2 and initial_nodes_coordinates.shape[1] == 3
-        # assert nodes_displacement.ndim == 3 and nodes_displacement.shape[1:] == initial_nodes_coordinates.shape
-        # # a veces el primer estado es la referencia: displacement en t=0 debe ser ~0
-        # if nodes_displacement.shape[0] > 0:
-        #     assert np.allclose(nodes_displacement[0], 0, atol=1e-12), "El primer estado no es cero; revisa referencia"
-
-        # Element fields
-        elements_id = arrays["element_shell_ids"]
-        elements_nodes_indexes = arrays["element_shell_node_indexes"]
-        elements_parts = arrays["element_shell_part_indexes"]
-        elements_stress = arrays["element_shell_stress"] # T, E, 3, 6
-        elements_stress_mean = elements_stress.mean(axis=2) # T, E, 6
-        elements_von_mises = self.__von_mises(elements_stress_mean) # T, E
-        elements_strain = arrays["element_shell_effective_plastic_strain"] # T, E, 3
-        elements_strain_mean = elements_strain.mean(axis=2) # T, E
-
-        nodes_parts_indexes = self.__infer_nodes_solid(elements_parts, elements_nodes_indexes) # index = 0 RIGIDO, index = 1 B-Pillar
-        nodes_rigid_mask = 1 - nodes_parts_indexes
-        
-
-        # Nodes tensors
-        nodes_coords_tensor = torch.tensor(nodes_coordinates, dtype=torch.float32) # (T, N, 3)
-        nodes_initial_coords_tensor = torch.tensor(initial_nodes_coordinates, dtype=torch.float32) # (T, N, 3)
-        nodes_displacement_tensor = torch.tensor(nodes_displacement, dtype=torch.float32) # (T, N, 3)
-        nodes_velocities_tensor = torch.tensor(nodes_velocities, dtype=torch.float32) # (T, N, 3)
-        nodes_accelerations_tensor = torch.tensor(nodes_acceleration, dtype=torch.float32) # (T, N, 3)
-        nodes_parts_indexes_tensor = torch.tensor(nodes_parts_indexes, dtype=torch.int) # (N)
-        nodes_rigid_mask_tensor = torch.tensor(nodes_rigid_mask, dtype=torch.int) # (N)
-        nodes_bc_mask_tensor, _, _ = self.__infer_fixed_nodes(nodes_coords_tensor, 1e-6) # (N))
-
-        # Elements tensor
-        edge_index_tensor, nodes_elements_index = self._build_and_adjacency_edge_index(elements_nodes_indexes, bidirectional=True, clique=False)
-        elements_von_mises_tensor = torch.tensor(elements_von_mises, dtype=torch.float32)
-        elements_strain_mean_tensor = torch.tensor(elements_strain_mean, dtype=torch.float32)
-
-        T, N, _ = nodes_coords_tensor.shape
-
-        pos0 = nodes_coords_tensor[0]
-        data_list = []
-        for t in range(0, T-1, time_step):
-            coords_t = nodes_coords_tensor[t] # (N,3)
-            coords_t1 = nodes_coords_tensor[t + 1] # (N,3)
-            displacements_t = nodes_displacement_tensor[t]
-            displacements_t1 = nodes_displacement_tensor[t+1]
-            v_t = nodes_velocities_tensor[t] # (N,3)
-            v_t1 = nodes_velocities_tensor[t + 1] # (N,3)
-            a_t = nodes_accelerations_tensor[t] # (N,3)
-            a_t1 = nodes_accelerations_tensor[t + 1] # (N,3)
-
-            svm_t = self.__avg_element_field_to_node(nodes_elements_index, elements_von_mises_tensor[t])
-            svm_t1 = self.__avg_element_field_to_node(nodes_elements_index, elements_von_mises_tensor[t+1])
-            peeq_t = self.__avg_element_field_to_node(nodes_elements_index, elements_strain_mean_tensor[t])
-            peeq_t1 = self.__avg_element_field_to_node(nodes_elements_index, elements_strain_mean_tensor[t+1])
-
-
-            x_t = torch.cat([displacements_t, v_t, a_t, svm_t, peeq_t], dim=1) # N_CH = 11
-            y_t = torch.cat([displacements_t1, v_t1, a_t1, svm_t1, peeq_t1], dim=1)  # N_CH = 11
-            assert x_t.shape == y_t.shape
-
-            edge_attr_tensor = self.__build_edge_attr(edge_index_tensor, pos0)
-            data = Data(
-                x=x_t,
-                y=y_t,
-                edge_index=edge_index_tensor,
-                edge_attr=edge_attr_tensor,
-                pos0=pos0,
-                bc_mask = nodes_bc_mask_tensor,
-                rigid_mask = nodes_rigid_mask_tensor,
-                simulation_id = simulation_id,
-                t_idx = torch.tensor([t], dtype=torch.long)
-            )
+                data = Data(
+                    x=x_t,
+                    y=y_t,
+                    edge_index=edge_index_tensor,
+                    edge_attr=edge_attr_tensor,
+                    pos0=pos0_tensor,
+                    bc_mask = nodes_bc_mask_tensor,
+                    rigid_mask = nodes_rigid_mask_tensor,
+                    simulation_id = simulation_id,
+                    t_idx = torch.tensor([t], dtype=torch.long)
+                )
         
             data_list.append(data)
 
@@ -208,11 +144,16 @@ class D3PlotPostProcess:
         reader.GetTimeStepRange()
 
         print("Time steps:", times)
+        all_time_steps = []
         all_displacements = []
         all_velocities = []
         all_accelerations = []
+        all_von_mises = []
+        all_pressures = []
+        all_efp = []
         pos0 = None
         connectivity = None
+        nodes_elements_index = None
         rigid_mask = None
         time_step = reader.GetTimeValue(1) - reader.GetTimeValue(0)
         for t in range(nsteps):
@@ -224,6 +165,9 @@ class D3PlotPostProcess:
             for i in range(n_blocks):
                 append.AddInputData(mb.GetBlock(i))
             append.Update()
+
+            time_step = reader.GetTimeValue(t) - reader.GetTimeValue(t-1) if t > 0 else 0
+            all_time_steps.append(time_step)
 
             dataset = append.GetOutput()
             # print("Nº de nodos combinados:", dataset.GetNumberOfPoints())
@@ -249,9 +193,16 @@ class D3PlotPostProcess:
                 # print("Número de elementos:", dataset.GetNumberOfCells())
                 # print("  Arrays de celdas:", [cd.GetArrayName(j) for j in range(cd.GetNumberOfArrays())])
                 cells = dataset.GetCells()  # objeto vtkCellArray
+                stress = numpy_support.vtk_to_numpy(cd.GetArray("Stress")) # (E,6) 
+                xx, yy, zz, xy, yz, zx = [stress[:, i] for i in range(6)]
+                all_von_mises.append(self.__compute_von_mises(xx, yy, zz, xy, yz, zx)) # (T, E, 6)
+                all_pressures.append(self.__compute_pressure(xx, yy, zz)) # ()
+                efp = numpy_support.vtk_to_numpy(cd.GetArray("EffPlastStrn")) # (E,1)
+                all_efp.append(efp)
+                
 
                 if connectivity == None:
-                    connectivity, _ = self._build_and_adjacency_edge_index_from_vtk(dataset)
+                    connectivity, nodes_elements_index = self._build_and_adjacency_edge_index_from_vtk(dataset)
                 # # recorrer elementos
                 # for i in range(dataset.GetNumberOfCells()):
                 #     cell = dataset.GetCell(i)  # vtkCell (ej. vtkQuad, vtkHexahedron…)
@@ -262,15 +213,22 @@ class D3PlotPostProcess:
         all_displacements = np.stack(all_displacements, axis=0) # (T,N,3)
         all_velocities = np.stack(all_velocities, axis=0) # (T,N,3)
         all_accelerations = np.stack(all_accelerations, axis=0) # (T,N,3)
-
         
+        all_von_mises = np.stack(all_von_mises, axis=0) # (T,E)
+        all_pressures = np.stack(all_pressures, axis=0) # (T,E)
+        all_efp = np.stack(all_efp, axis=0) # (T,E)
 
-        print("Fin")
 
-        return all_displacements, all_velocities, all_accelerations, pos0, rigid_mask, connectivity
+        return all_time_steps, all_displacements, all_velocities, all_accelerations, pos0, rigid_mask, connectivity, nodes_elements_index, all_von_mises, all_pressures, all_efp
 
     
-        
+    def __compute_von_mises(self, xx, yy, zz, xy, yz, zx):
+        vm = 0.5*((xx-yy)**2 + (yy-zz)**2 + (zz-xx)**2) + 3*(xy**2 + yz**2 + zx**2)
+        vm = np.sqrt(vm)
+        return vm
+    
+    def __compute_pressure(self, xx, yy, zz):
+        return -(xx + yy + zz) / 3.0
 
     def __build_id_map(self, node_ids):
         """
@@ -374,107 +332,7 @@ class D3PlotPostProcess:
             raise ValueError("No edges built from elements; check input.")
         edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
         return edge_index, nodes_elements_index
-    @staticmethod
-    def _build_and_adjacency_edge_index(elements, bidirectional=True, clique=True):
-        """
-        elements: lista de elementos, cada uno = [old_id_i, old_id_j, ...]
-        bidirectional: duplica aristas (i,j) y (j,i)
-        clique: si True conecta todos los pares del elemento (más denso y suele ir mejor).
-                si False conecta solo pares consecutivos (anillo).
-        """
-        nodes_elements_index = {}
-
-        undirected_pairs = set()
-        for i in range(len(elements)):
-            ids = elements[i]
-
-            for id in ids:
-                if id not in nodes_elements_index:
-                    nodes_elements_index[id] = set()
-                nodes_elements_index[id].add(i)
-
-            L = len(ids)
-            if L < 2:
-                continue
-            if clique:
-                for a in range(L):
-                    for b in range(a+1, L):
-                        u, v = ids[a], ids[b]
-                        if u == v: continue
-                        undirected_pairs.add((u, v) if u < v else (v, u))
-            else:
-                for a in range(L):
-                    u, v = ids[a], ids[(a+1) % L]
-                    if u == v: continue
-                    undirected_pairs.add((u, v) if u < v else (v, u))
-
-
-        edges = []
-        if bidirectional:
-            for u, v in undirected_pairs:
-                edges.append([u, v])
-                edges.append([v, u])
-        else:
-            edges = [[u, v] for (u, v) in undirected_pairs]
-
-        if len(edges) == 0:
-            raise ValueError("No edges built from elements; check input.")
-        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
-        return edge_index, nodes_elements_index
-
-    def __infer_nodes_solid(self, elements_parts, elements_nodes_index):
-        assert len(elements_parts) == len(elements_nodes_index)
-        N = np.max(elements_nodes_index) + 1
-        nodes_parts_index = np.full(N, -1, dtype=int)
-
-        for i in range(len(elements_parts)):
-            part = elements_parts[i]
-            affected_nodes_indexes = elements_nodes_index[i]
-            for node_index in affected_nodes_indexes:
-                nodes_parts_index[node_index] = part
-
-        assert not np.any(nodes_parts_index == -1)
-        return nodes_parts_index
     
-    def __infer_fixed_nodes(self, coords: torch.Tensor, tol: float):
-        """
-        coords: Tensor (T, N, 3) con coordenadas absolutas.
-        Devuelve:
-          - bc_mask: BoolTensor (N,) True si el nodo no se mueve (<= tol en toda la secuencia)
-          - fixed_idx: LongTensor (K,) índices de nodos fijos
-          - max_move: Tensor (N,) desplazamiento máximo por nodo (útil para depurar)
-        """
-        # Desplazamientos relativos al estado inicial
-        disp = coords - coords[0]               # (T, N, 3)
-        # Norma por timestep y nodo
-        step_norm = torch.linalg.norm(disp, dim=2)   # (T, N)
-        # Máximo a lo largo del tiempo
-        max_move = step_norm.max(dim=0).values       # (N,)
-        bc_mask = max_move <= tol
-        fixed_idx = torch.nonzero(bc_mask, as_tuple=True)[0]
-        return bc_mask, fixed_idx, max_move
-    
-    def __avg_element_field_to_node(self, nodes_elements_index, element_field):
-        N = len(nodes_elements_index)
-        node_field = np.full(N, -99999, dtype=int)
-        for node_index, elements in nodes_elements_index.items():
-            total_node_value = 0
-            for element in elements:
-                total_node_value += float(element_field[element])
-            avg_node_value = total_node_value / len(elements)
-            node_field[node_index] = avg_node_value
-        assert not np.any(node_field == -99999)
-        
-        return torch.tensor(node_field, dtype=torch.float).float().unsqueeze(1)
-
-    def __von_mises(self, sig6):
-        """sig6: (..., 6) -> von Mises (broadcast). Orden [sxx, syy, szz, sxy, syz, szx]."""
-        sxx = sig6[..., 0]; syy = sig6[..., 1]; szz = sig6[..., 2]
-        sxy = sig6[..., 3]; syz = sig6[..., 4]; szx = sig6[..., 5]
-        return np.sqrt(
-            0.5 * ((sxx - syy)**2 + (syy - szz)**2 + (szz - sxx)**2) +
-            3.0 * (sxy**2 + syz**2 + szx**2)
-        )
     def __build_edge_attr(self, edge_index, pos0):
             src, dst = edge_index
             rel_vec = pos0[dst] - pos0[src]            # (E, 3)
@@ -482,26 +340,111 @@ class D3PlotPostProcess:
             direction = rel_vec / (length + 1e-9)       # (E, 3)
             edge_attr = torch.cat([length, direction], dim=-1)  # (E, 4)
             return edge_attr
+    
+    def __avg_element_field_to_node(self, nodes_elements_index, elem_field_1d, N=None):
+        """
+        nodes_elements_index: dict {node_id: set(elem_ids)}
+        elem_field_1d: np.ndarray shape (E,)
+        N: nº de nodos (opcional; si None, usa max key + 1)
+        """
+        if N is None:
+            N = max(nodes_elements_index.keys()) + 1
+        out = np.zeros((N,), dtype=np.float32)
+        for n, elems in nodes_elements_index.items():
+            if len(elems) == 0:
+                out[n] = 0.0
+            else:
+                vals = elem_field_1d[list(elems)]
+                out[n] = float(np.nanmean(vals))
+        return out  
+    
 
-    @staticmethod
-    def elem_scalar_to_node_avg(elem_scalar, elements_nodes_idx, N):
+    def check_vel_disp_consistency(self, all_displacements, all_velocities, all_time_steps, name=""):
         """
-        elem_scalar: (Ne,) escalar por elemento (p.ej., von Mises ya promediado por capas)
-        elements_nodes_idx: lista de listas con índices 0..N-1 de los nodos de cada elemento
-        N: nº nodos
-        -> Devuelve (N,) con promedio simple por nodo.
+        all_displacements: np.ndarray (T, N, 3)
+        all_velocities:    np.ndarray (T, N, 3)
+        all_time_steps:    list/np.ndarray (T,) con dt[0]=0 y dt[t]=time[t]-time[t-1]
         """
-        acc = np.zeros(N, dtype=np.float64)
-        cnt = np.zeros(N, dtype=np.int32)
-        for e, nodes_idx in enumerate(elements_nodes_idx):
-            if not nodes_idx: 
-                continue
-            v = float(elem_scalar[e])
-            for j in nodes_idx:
-                acc[j] += v
-                cnt[j] += 1
-        cnt[cnt == 0] = 1
-        return (acc / cnt).astype(np.float32)
+        disp = np.asarray(all_displacements, dtype=np.float64)
+        vel  = np.asarray(all_velocities,    dtype=np.float64)
+        dt    = np.asarray(all_time_steps,   dtype=np.float64)
+
+        T, N, C = disp.shape
+        assert vel.shape == disp.shape, f"vel shape {vel.shape} != disp shape {disp.shape}"
+        assert dt.shape[0] == T, f"time_steps len {dt.shape[0]} != T {T}"
+        assert C == 3, "Se esperaba 3 componentes (x,y,z)"
+
+        # Diferencias entre t y t+1
+        dx = disp[1:] - disp[:-1]                # (T-1, N, 3)
+        dt_steps = dt[1:].reshape(-1, 1, 1)      # (T-1, 1, 1) para broadcasting
+
+        v_fwd  = vel[:-1]                        # v_t
+        v_back = vel[1:]                         # v_{t+1}
+        v_trap = 0.5 * (v_fwd + v_back)          # (v_t + v_{t+1})/2
+
+        pred_fwd  = v_fwd  * dt_steps
+        pred_back = v_back * dt_steps
+        pred_trap = v_trap * dt_steps
+
+        err_fwd  = dx - pred_fwd
+        err_back = dx - pred_back
+        err_trap = dx - pred_trap
+
+        # Métricas: RMSE absoluto y relativo (respecto a ||dx||)
+        eps = 1e-12
+        def rmse(a): return np.sqrt(np.mean(a**2))
+        def rel_rmse(err, ref): return rmse(err) / (rmse(ref) + eps)
+
+        rmse_dx      = rmse(dx)
+        rmse_fwd     = rmse(err_fwd)
+        rmse_back    = rmse(err_back)
+        rmse_trap    = rmse(err_trap)
+
+        rrel_fwd  = rel_rmse(err_fwd,  dx)
+        rrel_back = rel_rmse(err_back, dx)
+        rrel_trap = rel_rmse(err_trap, dx)
+
+        # También por componente (x,y,z), por si quieres ver asimetrías
+        comp = ['x','y','z']
+        comp_stats = {}
+        for i in range(3):
+            comp_stats[comp[i]] = dict(
+                rmse_dx   = rmse(dx[:,:,i]),
+                rmse_fwd  = rmse(err_fwd[:,:,i]),
+                rmse_back = rmse(err_back[:,:,i]),
+                rmse_trap = rmse(err_trap[:,:,i]),
+                rel_fwd   = rel_rmse(err_fwd[:,:,i],  dx[:,:,i]),
+                rel_back  = rel_rmse(err_back[:,:,i], dx[:,:,i]),
+                rel_trap  = rel_rmse(err_trap[:,:,i], dx[:,:,i]),
+            )
+
+        # Resumen
+        print(f"\n=== Consistencia Δ vs v {('('+name+')') if name else ''} ===")
+        print(f"T={T}, N={N}")
+        print(f"RMSE(dx):      {rmse_dx: .6e}")
+        print(f"RMSE forward:  {rmse_fwd: .6e}   (rel {rrel_fwd: .3%})")
+        print(f"RMSE backward: {rmse_back: .6e}  (rel {rrel_back: .3%})")
+        print(f"RMSE trapz:    {rmse_trap: .6e}  (rel {rrel_trap: .3%})")
+        best = min([("forward", rrel_fwd), ("backward", rrel_back), ("trapezoidal", rrel_trap)], key=lambda x: x[1])
+        print(f"▶ Mejor esquema (global): {best[0]}")
+
+        print("\nPor componente:")
+        for ax in comp:
+            s = comp_stats[ax]
+            print(f"  {ax}: RMSE(dx)={s['rmse_dx']: .3e} | fwd={s['rmse_fwd']: .3e} ({s['rel_fwd']:.2%})"
+                f"  back={s['rmse_back']: .3e} ({s['rel_back']:.2%})  trap={s['rmse_trap']: .3e} ({s['rel_trap']:.2%})")
+
+        # Devuelve por si quieres usarlo programáticamente
+        return {
+            "global": {
+                "rmse_dx": rmse_dx,
+                "forward": {"rmse": rmse_fwd, "rel": rrel_fwd},
+                "backward":{"rmse": rmse_back,"rel": rrel_back},
+                "trapz":   {"rmse": rmse_trap,"rel": rrel_trap},
+                "best": best[0],
+            },
+            "per_component": comp_stats
+        }
 
 
 if __name__ == "__main__":
